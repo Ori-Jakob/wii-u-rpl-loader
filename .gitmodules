@@ -1,0 +1,4 @@
+[submodule "external/FunctionPatcherModule"]
+	path = external/FunctionPatcherModule
+	url = https://github.com/Ori-Jakob/FunctionPatcherModule.git
+	branch = nullname-fix

@@ -1,0 +1,10 @@
+# Build output
+build/
+build_*/
+*.wps
+*.elf
+*.map
+*.lst
+*.rpl
+*.bare.rpl
+*.crt.rpl
