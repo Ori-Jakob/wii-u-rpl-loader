@@ -68,6 +68,8 @@ static const RplManifest sManifest = {
     RPL_FLAG_ALLOW_RELEASE,
     onInit,
     onDeinit,
+    0,                       /* maxHooks: the loader default */
+    NULL, NULL,              /* no foreground callbacks */
 };
 
 RPL_MANIFEST(sManifest)

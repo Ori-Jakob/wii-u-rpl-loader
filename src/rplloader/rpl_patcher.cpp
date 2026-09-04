@@ -1,8 +1,10 @@
 #include "rplloader/rpl_patcher.h"
 
+#include "rplloader/rpl_library.h"
 #include "rplloader/rpl_log.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <coreinit/memorymap.h>
@@ -52,6 +54,30 @@ static bool toDesc(const ModulePatches& mp, const RplHook* h, WuPatch::Desc& d)
     d.replacement   = h->replacement;
     d.priority      = mp.priority;
     d.flags         = (h->flags & RPL_HOOK_EXCLUSIVE) ? WuPatch::FLAG_EXCLUSIVE : 0;
+
+    if (h->function) {
+        // A library export: where it is depends on the process, so it is
+        // looked up now and the declared address and word do not apply.
+        const uint32_t addr = Library::Resolve(h->module, h->function);
+        if (!addr) {
+            Log::Printf(Log::ERROR, "%s: hook '%s' -- %s does not give up %s", mp.owner,
+                        h->name ? h->name : "?", h->module ? h->module : "?", h->function);
+            return false;
+        }
+        d.external      = true;
+        d.functionName  = h->function;
+        d.library       = Library::IdFor(h->module);
+        d.site.linkAddr = addr;
+        d.site.expected = 0;
+        d.shape         = WuPatch::SHAPE_JUMP;
+        if (h->shape != RPL_SHAPE_JUMP) {
+            Log::Printf(Log::ERROR, "%s: hook '%s' is a library export, so it can only "
+                        "replace the function", mp.owner, h->name ? h->name : "?");
+            return false;
+        }
+        return true;
+    }
+
     switch (h->shape) {
     case RPL_SHAPE_JUMP:    d.shape = WuPatch::SHAPE_JUMP;    break;
     case RPL_SHAPE_CALL:    d.shape = WuPatch::SHAPE_CALL;    break;
@@ -72,10 +98,50 @@ static int slotOf(const ModulePatches& mp, const RplHook* h)
     return -1;
 }
 
+bool Reserve(ModulePatches& mp, uint32_t want)
+{
+    int wanted = want ? (int)want : kDefaultHooksPerModule;
+    if (wanted > kMaxHooksPerModule) {
+        Log::Printf(Log::WARN, "%s: asked for %u hooks, libwupatch holds %d", mp.owner,
+                    (unsigned)want, kMaxHooksPerModule);
+        wanted = kMaxHooksPerModule;
+    }
+    if (mp.hooks && mp.capacity >= wanted)
+        return true;
+
+    ReleaseStorage(mp);
+    mp.hooks = (HookSlot*)calloc((size_t)wanted, sizeof(HookSlot));
+    if (!mp.hooks) {
+        Log::Printf(Log::ERROR, "%s: no room for %d hook slots", mp.owner, wanted);
+        return false;
+    }
+    mp.capacity = wanted;
+    if (want)
+        Log::Printf(Log::INFO, "%s: room for %d hooks", mp.owner, wanted);
+    return true;
+}
+
+void ReleaseStorage(ModulePatches& mp)
+{
+    free(mp.hooks);
+    mp.hooks = 0;
+    mp.capacity = 0;
+    mp.count = 0;
+}
+
+void SiteText(const RplHook* h, char* out, int cap)
+{
+    if (h->function)
+        snprintf(out, (size_t)cap, "%s:%s", h->module ? h->module : "?", h->function);
+    else
+        snprintf(out, (size_t)cap, "%08X", (unsigned)h->linkAddr);
+}
+
 static bool declareOne(ModulePatches& mp, const RplHook* h, bool dynamic)
 {
-    if (mp.count >= kMaxHooksPerModule) {
-        Log::Printf(Log::ERROR, "%s: more than %d hooks", mp.owner, kMaxHooksPerModule);
+    if (mp.count >= mp.capacity) {
+        Log::Printf(Log::ERROR, "%s: more than %d hooks; raise maxHooks in the manifest",
+                    mp.owner, mp.capacity);
         return false;
     }
     WuPatch::Desc d;
@@ -105,9 +171,11 @@ bool DeclareTable(ModulePatches& mp, const RplManifest* m)
     for (int i = 0; i < mp.count; ++i) {
         const HookSlot& s = mp.hooks[i];
         const WuPatch::State st = WuPatch::GetState(s.handle);
+        char where[64];
+        SiteText(s.hook, where, sizeof(where));
         Log::Printf(st == WuPatch::STATE_APPLIED ? Log::INFO : Log::WARN,
-                    "%s: %-24s %08X %s%s chain %d/%d", mp.owner, s.hook->name ? s.hook->name : "?",
-                    (unsigned)s.hook->linkAddr, WuPatch::StateName(st),
+                    "%s: %-24s %-40s %s%s chain %d/%d", mp.owner,
+                    s.hook->name ? s.hook->name : "?", where, WuPatch::StateName(st),
                     (s.hook->flags & RPL_HOOK_REQUIRED) ? " (required)" : "",
                     WuPatch::ChainPosition(s.handle), WuPatch::ChainLength(s.handle));
     }
@@ -129,8 +197,15 @@ void Publish(const ModulePatches& mp)
 {
     for (int i = 0; i < mp.count; ++i) {
         const HookSlot& s = mp.hooks[i];
-        if (s.hook->original)
-            *s.hook->original = (void*)(uintptr_t)WuPatch::GetOriginalThunk(s.handle);
+        if (!s.hook->original)
+            continue;
+        const uint32_t thunk = WuPatch::GetOriginalThunk(s.handle);
+        *s.hook->original = (void*)(uintptr_t)thunk;
+        // The displaced word cannot run from a stub, so there is nothing to
+        // call the original through. Say so: the hook is live either way.
+        if (!thunk && WuPatch::GetState(s.handle) == WuPatch::STATE_APPLIED)
+            Log::Printf(Log::WARN, "%s: '%s' has no original to call", mp.owner,
+                        s.hook->name ? s.hook->name : "?");
     }
 }
 
@@ -160,9 +235,11 @@ int AddDynamic(ModulePatches& mp, const RplHook* h)
     const WuPatch::State st = WuPatch::GetState(s.handle);
     if (h->original)
         *h->original = (void*)(uintptr_t)WuPatch::GetOriginalThunk(s.handle);
+    char where[64];
+    SiteText(h, where, sizeof(where));
     Log::Printf(st == WuPatch::STATE_APPLIED ? Log::INFO : Log::WARN,
-                "%s: dynamic %-16s %08X %s", mp.owner, h->name ? h->name : "?",
-                (unsigned)h->linkAddr, WuPatch::StateName(st));
+                "%s: dynamic %-16s %-40s %s", mp.owner, h->name ? h->name : "?",
+                where, WuPatch::StateName(st));
     if (st == WuPatch::STATE_APPLIED)
         return 0;
     // Leave nothing behind for a hook that did not take.
@@ -212,6 +289,13 @@ const char* StateName(WuPatch::State s)
 
 void DryRunCheck(const RplHook* h, char* out, int cap)
 {
+    if (h->function) {
+        const uint32_t addr = Library::Resolve(h->module, h->function);
+        snprintf(out, (size_t)cap, "%s:%s -> %08X %s", h->module ? h->module : "?",
+                 h->function, (unsigned)addr, addr ? "would replace" : "not found");
+        return;
+    }
+
     const uint32_t runtime = h->linkAddr + s_textDelta;
     if (runtime < s_rpxTextAddr || runtime - s_rpxTextAddr + 4u > s_rpxTextSize) {
         snprintf(out, (size_t)cap, "%08X -> %08X outside the rpx text", (unsigned)h->linkAddr, (unsigned)runtime);

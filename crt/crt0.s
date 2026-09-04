@@ -18,6 +18,7 @@ __rpl_loader_start:
 load:
     bl      __init_wut
     bl      __init_wut_malloc
+    bl      __rpl_init_heap   # nothing else gives an injected RPL a malloc
     bl      __init
     lwz     3, 0x08(1)
     lwz     4, 0x0C(1)
@@ -32,6 +33,7 @@ unload:
     bl      __fini
     bl      __fini_wut_malloc
     bl      __fini_wut
+    bl      __rpl_fini_heap   # last: everything above may still free
     lwz     3, 0x10(1)
 
 done:

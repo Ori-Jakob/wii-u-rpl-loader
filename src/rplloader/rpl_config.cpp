@@ -213,8 +213,10 @@ static void addModule(WUPSConfigCategoryHandle parent, const Module& m, int inde
     for (int i = 0; i < m.patches.count; ++i) {
         const Patcher::HookSlot& s = m.patches.hooks[i];
         const WuPatch::State st = WuPatch::GetState(s.handle);
-        addStub(cat, "%-14s %08X %s%s %d/%d", s.hook->name ? s.hook->name : "?",
-                (unsigned)s.hook->linkAddr, Patcher::StateName(st),
+        char where[64];
+        Patcher::SiteText(s.hook, where, sizeof(where));
+        addStub(cat, "%-14s %s %s%s %d/%d", s.hook->name ? s.hook->name : "?",
+                where, Patcher::StateName(st),
                 (s.hook->flags & RPL_HOOK_REQUIRED) ? "*" : "",
                 WuPatch::ChainPosition(s.handle), WuPatch::ChainLength(s.handle));
     }

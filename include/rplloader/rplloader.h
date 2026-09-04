@@ -7,7 +7,7 @@ extern "C" {
 #endif
 
 #define RPL_MAGIC        0x52504C4Cu   /* 'RPLL' */
-#define RPL_ABI_VERSION  1u
+#define RPL_ABI_VERSION  4u
 
 typedef enum RplShape {
     // At a function entry this is a plain replacement, *original is the rest of it
@@ -44,10 +44,24 @@ typedef struct RplHook {
     const void* hook;         // JUMP / CALL target; NULL for REWRITE
     uint32_t    replacement;  // REWRITE word
     void**      original;     // receives the original thunk; may be NULL
+
+    // An export of a system library instead of an address in the title. The
+    // loader resolves it in the running process, so linkAddr and expected are
+    // ignored and the shape has to be JUMP. See RPL_REPLACE_LIB.
+    const char* module;       // "gx2", "coreinit", "vpad", ... without the .rpl
+    const char* function;     // the exported name
 } RplHook;
 
 enum { RPL_LOG_ERROR = 0, RPL_LOG_WARN = 1, RPL_LOG_INFO = 2, RPL_LOG_VERBOSE = 3 };
 enum { RPL_NOTIFY_INFO = 0, RPL_NOTIFY_ERROR = 1 };
+
+// Laid out like VPADTouchData so it can be handed straight to
+// VPADGetTPCalibratedPoint, which is what turns it into screen coordinates.
+typedef struct RplTouch {
+    uint16_t x, y;
+    uint16_t touched;
+    uint16_t validity;
+} RplTouch;
 
 // The GamePad as the title last read it, VPADButtons bits and sticks -1..1
 typedef struct RplPad {
@@ -56,8 +70,30 @@ typedef struct RplPad {
     uint32_t release;
     float    leftX, leftY;
     float    rightX, rightY;
+    RplTouch touch;
     uint32_t sample;     // counts the title's reads; 0 until the first
 } RplPad;
+
+#define RPL_KPAD_CHANNELS 4u
+
+// One KPAD channel as the title last read it. `extension` is a
+// WPADExtensionType and says which raw button set `hold` was taken from:
+// WPAD_EXT_PRO_CONTROLLER, WPAD_EXT_CLASSIC or WPAD_EXT_MPLUS_CLASSIC. Any
+// other extension reports buttons of 0.
+typedef struct RplKpad {
+    uint32_t extension;
+    uint32_t hold;
+    uint32_t trigger;
+    uint32_t release;
+    float    leftX, leftY;
+    float    rightX, rightY;
+    uint32_t sample;
+} RplKpad;
+
+enum {
+    RPL_INPUT_PASS  = 0,   // the title reads the pad as it is
+    RPL_INPUT_BLOCK = 1,   // the title reads nothing, on every controller
+};
 
 // Every call takes its own host back so the loader knows who is asking
 typedef struct RplHost RplHost;
@@ -89,6 +125,14 @@ struct RplHost {
 
     // Reading the pad directly steals samples the title expects
     int      (*pad)(const RplHost* h, RplPad* out);
+    int      (*kpad)(const RplHost* h, uint32_t chan, RplKpad* out);
+
+    // What the title sees on its next read. RPL_INPUT_BLOCK is what an overlay
+    // holds while it has the controller; the loader still reports every sample.
+    void     (*setInputMode)(const RplHost* h, int mode);
+    // Two floats -1..1 driving the left stick in the title's place, or NULL to
+    // hand it back. Applies on every controller, and survives BLOCK.
+    void     (*setStick)(const RplHost* h, const float* leftXY);
 };
 
 enum {
@@ -110,6 +154,14 @@ typedef struct RplManifest {
     uint32_t        flags;
     int  (*onInit)(const RplHost* host);   // 0 to stay loaded
     void (*onDeinit)(void);                // may be NULL
+    // Room for the table plus whatever onInit adds. 0 takes the loader's
+    // default; more than it can serve is clamped, and the log says so.
+    uint32_t        maxHooks;
+    // The HOME menu took the screen, and gave it back. GPU resources do not
+    // survive the trip: drop them in the first and rebuild them lazily after
+    // the second. Both may be NULL.
+    void (*onReleaseForeground)(void);
+    void (*onAcquiredForeground)(void);
 } RplManifest;
 
 typedef const RplManifest* (*RplManifestFn)(void);
@@ -129,16 +181,29 @@ typedef const RplManifest* (*RplManifestFn)(void);
 
 #define RPL_REPLACE(name, linkAddr, expectedWord, hookFlags)                \
     { #name, (linkAddr), (expectedWord), RPL_SHAPE_JUMP, (hookFlags),       \
-      (const void*)&my_##name, 0u, (void**)&real_##name }
+      (const void*)&my_##name, 0u, (void**)&real_##name, 0, 0 }
+
+// Replace an export of a system library, the way a WUPS plugin replaces one.
+// The C name is the exported name, so RPL_DECL_REPLACE takes it verbatim:
+//   RPL_DECL_REPLACE(void, GX2SetContextState, GX2ContextState* s) { ... }
+//   RPL_REPLACE_LIB(GX2SetContextState, "gx2", RPL_HOOK_REQUIRED)
+#define RPL_REPLACE_LIB(name, moduleName, hookFlags)                        \
+    { #name, 0u, 0u, RPL_SHAPE_JUMP, (hookFlags),                           \
+      (const void*)&my_##name, 0u, (void**)&real_##name, (moduleName), #name }
+
+// When the export is not spelled the way the C function is
+#define RPL_REPLACE_LIB_AS(name, moduleName, exportName, hookFlags)         \
+    { #name, 0u, 0u, RPL_SHAPE_JUMP, (hookFlags),                           \
+      (const void*)&my_##name, 0u, (void**)&real_##name, (moduleName), (exportName) }
 
 // asmHook honours the CALL contract, realSlot takes the thunk or NULL
 #define RPL_HOOK_CALL(label, linkAddr, expectedWord, hookFlags, asmHook, realSlot) \
     { label, (linkAddr), (expectedWord), RPL_SHAPE_CALL, (hookFlags),             \
-      (const void*)(asmHook), 0u, (void**)(realSlot) }
+      (const void*)(asmHook), 0u, (void**)(realSlot), 0, 0 }
 
 #define RPL_HOOK_REWRITE(label, linkAddr, expectedWord, hookFlags, word) \
     { label, (linkAddr), (expectedWord), RPL_SHAPE_REWRITE, (hookFlags), \
-      (const void*)0, (word), (void**)0 }
+      (const void*)0, (word), (void**)0, 0, 0 }
 
 #define RPL_NOP 0x60000000u   /* ori r0, r0, 0 */
 

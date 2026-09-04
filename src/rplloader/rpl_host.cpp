@@ -133,6 +133,21 @@ static int hostPad(const RplHost*, RplPad* out)
     return Input::Get(out) ? 1 : 0;
 }
 
+static int hostKpad(const RplHost*, uint32_t chan, RplKpad* out)
+{
+    return Input::GetKpad(chan, out) ? 1 : 0;
+}
+
+static void hostSetInputMode(const RplHost*, int mode)
+{
+    Input::SetMode(mode);
+}
+
+static void hostSetStick(const RplHost*, const float* leftXY)
+{
+    Input::SetStick(leftXY);
+}
+
 void Bind(Module& m, uint64_t titleId, uint32_t textDelta, uint32_t dataDelta, const char* dir)
 {
     s_titleId = titleId;
@@ -158,6 +173,9 @@ void Bind(Module& m, uint64_t titleId, uint32_t textDelta, uint32_t dataDelta, c
     h.getBool    = hostGetBool;
     h.setBool    = hostSetBool;
     h.pad        = hostPad;
+    h.kpad       = hostKpad;
+    h.setInputMode = hostSetInputMode;
+    h.setStick   = hostSetStick;
 }
 
 } // namespace Host

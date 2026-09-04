@@ -173,6 +173,11 @@ static void loadOne(Module& m)
     }
 
     copyText(m.patches.owner, sizeof(m.patches.owner), m.name);
+    // The table plus whatever onInit will add
+    if (!Patcher::Reserve(m.patches, m.manifest->maxHooks)) {
+        fail(m, MOD_HOOKS_FAILED, "no memory for its hook slots");
+        return;
+    }
     Host::Bind(m, s_titleId, s_textDelta, s_dataDelta, s_dir);
 
     if (cfg.dryRun) {
@@ -222,6 +227,10 @@ static void loadOne(Module& m)
 
 void OnApplicationStart()
 {
+    // The plugin outlives the title, so last title's slots are still ours
+    for (int i = 0; i < s_count; ++i)
+        Patcher::ReleaseStorage(s_modules[i].patches);
+
     s_started = true;
     s_exited = false;
     s_safeMode = false;
@@ -328,11 +337,31 @@ void OnApplicationExit()
         Patcher::RemoveAll();
 }
 
+void OnReleaseForeground()
+{
+    for (int i = 0; i < s_count; ++i) {
+        Module& m = s_modules[i];
+        if (m.initialised && m.manifest && m.manifest->onReleaseForeground)
+            m.manifest->onReleaseForeground();
+    }
+}
+
+void OnAcquiredForeground()
+{
+    for (int i = 0; i < s_count; ++i) {
+        Module& m = s_modules[i];
+        if (m.initialised && m.manifest && m.manifest->onAcquiredForeground)
+            m.manifest->onAcquiredForeground();
+    }
+}
+
 void OnApplicationEnd()
 {
     OnApplicationExit();
     if (s_configured)
         Patcher::OnApplicationEnd();
+    for (int i = 0; i < s_count; ++i)
+        Patcher::ReleaseStorage(s_modules[i].patches);
     s_configured = false;
     s_started = false;
 }

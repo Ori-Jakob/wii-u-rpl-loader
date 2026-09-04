@@ -37,6 +37,16 @@ ON_APPLICATION_START()
     Rpl::Loader::OnApplicationStart();
 }
 
+ON_RELEASE_FOREGROUND()
+{
+    Rpl::Loader::OnReleaseForeground();
+}
+
+ON_ACQUIRED_FOREGROUND()
+{
+    Rpl::Loader::OnAcquiredForeground();
+}
+
 ON_APPLICATION_REQUESTS_EXIT()
 {
     Rpl::Loader::OnApplicationExit();

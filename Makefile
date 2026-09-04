@@ -38,8 +38,16 @@ INCLUDES := include $(LIBWUPATCH)/include
 #-------------------------------------------------------------------------------
 # options for code generation
 #-------------------------------------------------------------------------------
+# libwupatch sizes its tables at compile time and an RPL asking for more hooks
+# than these can hold is clamped. Each patch and each site also costs a 64-byte
+# shim slot in .bss. Neither may exceed 255.
+WUPATCH_MAX_PATCHES ?= 192
+WUPATCH_MAX_SITES   ?= 160
+
 CFLAGS   := -Wall -Wextra -O2 -ffunction-sections -fdata-sections \
-            $(MACHDEP) $(INCLUDE) -D__WIIU__ -D__WUT__ -D__WUPS__
+            $(MACHDEP) $(INCLUDE) -D__WIIU__ -D__WUT__ -D__WUPS__ \
+            -DWUPATCH_MAX_PATCHES=$(WUPATCH_MAX_PATCHES) \
+            -DWUPATCH_MAX_SITES=$(WUPATCH_MAX_SITES)
 
 ifeq ($(DEBUG),VERBOSE)
 CFLAGS   += -DDEBUG -DVERBOSE_DEBUG
@@ -107,10 +115,10 @@ export INCLUDE  := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 
 export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
-.PHONY: $(BUILD) clean all
+.PHONY: $(BUILD) clean all module
 
 #-------------------------------------------------------------------------------
-all: $(BUILD)
+all: $(BUILD) module
 
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
@@ -118,9 +126,29 @@ $(BUILD):
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
 #-------------------------------------------------------------------------------
+# FunctionPatcherModule with the null-name fix, from the submodule. The plugin
+# refuses to patch by executable name while an unnamed module is loaded, so the
+# stock module is not enough. Goes in sd:/wiiu/environments/<env>/modules/ and
+# needs a reboot, like any module.
+#-------------------------------------------------------------------------------
+FPMODULE     := external/FunctionPatcherModule
+FPMODULE_WMS := $(FPMODULE)/FunctionPatcherModule.wms
+
+module:
+	@if [ ! -f $(FPMODULE)/Makefile ]; then \
+		echo "$(FPMODULE) is empty. Run: git submodule update --init"; exit 1; fi
+	@if [ ! -f $(WUMS_ROOT)/lib/libkernel.a ]; then \
+		echo "libkernel is missing from $(WUMS_ROOT)."; \
+		echo "Get it from https://github.com/wiiu-env/libkernel and run 'make install' there."; \
+		exit 1; fi
+	@$(MAKE) --no-print-directory -C $(FPMODULE)
+
+#-------------------------------------------------------------------------------
 clean:
 	@echo clean ...
 	@rm -fr $(BUILD) $(TARGET).wps $(TARGET).elf $(TARGET).lst $(TARGET).map
+	@if [ -f $(FPMODULE)/Makefile ]; then \
+		$(MAKE) --no-print-directory -C $(FPMODULE) clean; fi
 
 #-------------------------------------------------------------------------------
 # deploy: build, then send the plugin to a console running Aroma's wiiload

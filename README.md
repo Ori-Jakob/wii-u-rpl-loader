@@ -44,6 +44,7 @@ static const RplManifest sManifest = {
     0,                           // priority
     RPL_FLAG_ALLOW_RELEASE,
     onInit, NULL,
+    0,                           // maxHooks: the loader default
 };
 
 RPL_MANIFEST(sManifest)
@@ -67,20 +68,69 @@ for the `OSDynLoad_*` calls that take one.
 
 ## Hook types
 
-Three shapes, one macro each. The first four arguments are the same in all of
-them: a name for the log, the link-time address, the instruction expected there,
-and the flags from the next section.
+Three shapes for a site in the title, plus one macro for an export of a system
+library. The address-based three take the same first four arguments: a name for
+the log, the link-time address, the instruction expected there, and the flags
+from the next section.
 
 | Macro | Shape | What happens at the site |
 |---|---|---|
 | `RPL_REPLACE(name, addr, word, flags)` | `RPL_SHAPE_JUMP` | Branches to your function with LR untouched. At a function's first instruction that makes it a replacement: write a C function with the game function's signature, and `real_<name>` calls the rest of the original. Anywhere else the hook is assembly that never returns. |
 | `RPL_HOOK_CALL(label, addr, word, flags, asmHook, realSlot)` | `RPL_SHAPE_CALL` | Enters `asmHook` as if by `bl`, with LR pointing at the instruction after the site. Assembly only: end in `blr`, or branch to the thunk in `realSlot` to run the displaced instruction and carry on. `r11` and CTR are already clobbered on entry; everything else, including CR, must be preserved. |
 | `RPL_HOOK_REWRITE(label, addr, word, flags, replacement)` | `RPL_SHAPE_REWRITE` | Runs one instruction of your choosing in place of the site's, then continues at the next one. `RPL_NOP` deletes the instruction. The replacement must be position independent and must not read `r11`. Does not chain. |
+| `RPL_REPLACE_LIB(name, module, flags)` | `RPL_SHAPE_JUMP` | Replaces an export of a system library rather than an address in the title. `module` is the RPL name without its `.rpl`, and the C function name is the export. Otherwise it behaves exactly like `RPL_REPLACE`: `real_<name>` is the original. |
 
 `RPL_DECL_REPLACE(ret, name, ...)` goes with `RPL_REPLACE` and declares the pair
 of symbols it expects, `my_<name>` for your body and `real_<name>` for the
 original, the same shape as WUPS's `DECL_FUNCTION`. A hook that never calls
 `real_<name>` replaces the function outright.
+
+### How many hooks
+
+`maxHooks` is the size of the hook table the plugin keeps for this RPL: the
+manifest's own hooks plus whatever `onInit` adds through `host->addHook`. Zero
+takes the default, 32. Asking for more than the plugin can serve is clamped and
+logged rather than refused, and the ceiling is libwupatch's own table, set by
+`WUPATCH_MAX_PATCHES` when the plugin is built:
+
+```
+make WUPATCH_MAX_PATCHES=255 WUPATCH_MAX_SITES=255
+```
+
+Both default to 192 and 160 and neither may exceed 255. A patch and a site each
+cost a 64-byte shim slot in the plugin's `.bss`, so the defaults are a size
+trade rather than a hard limit.
+
+## Reading the controller
+
+The plugin already replaces `VPADRead` and `KPADReadEx`, so an RPL never hooks
+them itself. It reads what the title read:
+
+```c
+RplPad pad;
+if (host->pad(host, &pad) && (pad.hold & VPAD_BUTTON_ZL))
+    doSomething();
+
+RplKpad kpad;
+for (uint32_t chan = 0; chan < RPL_KPAD_CHANNELS; ++chan)
+    if (host->kpad(host, chan, &kpad) && kpad.extension == WPAD_EXT_PRO_CONTROLLER)
+        useProButtons(kpad.hold);
+```
+
+`RplPad` is the GamePad in `VPADButtons` bits. `RplKpad` is one KPAD channel,
+and `extension` says which raw button set `hold` came from: Pro and Classic
+report their own bits, anything else reports 0. Both carry a `sample` counter
+and report false until the title has read that controller at least once.
+`RplPad::touch` is laid out like `VPADTouchData`, so it goes straight to
+`VPADGetTPCalibratedPoint`.
+
+Two calls change what the title sees rather than just observing it.
+`host->setInputMode(host, RPL_INPUT_BLOCK)` makes every controller read as
+idle, which is what an overlay holds while it has the controller;
+`RPL_INPUT_PASS` gives it back. `host->setStick(host, xy)` drives the left
+stick in the title's place from two floats in -1..1, and NULL stops. Both
+survive until they are changed, and both are cleared when the title exits, so
+an RPL that leaves one set does not affect the next one.
 
 ## Hook flags
 
@@ -97,6 +147,45 @@ One flag lives on the manifest rather than on a hook:
 | Flag | Effect |
 |---|---|
 | `RPL_FLAG_ALLOW_RELEASE` | Lets the plugin unload this RPL with `OSDynLoad_Release` when it fails. Without it a failed RPL stays loaded and inert. |
+
+### Replacing a system library function
+
+An address only means something inside the title. A `bl` to `GX2SetContextState`
+is not one: the call sites in the RPX are placeholders that the Cafe loader
+fills in when it resolves the import, so the word a disassembler shows there is
+not the word the console runs, and there is nothing to declare.
+
+`RPL_REPLACE_LIB` takes the module and the export name instead, the way a WUPS
+plugin does. The plugin looks the export up with `OSDynLoad_FindExport` in the
+running process and submits it to the FunctionPatcher by library and name, so
+the patch is on the function itself and every caller in the process goes through
+it, wherever the call is.
+
+```c
+RPL_DECL_REPLACE(void, GX2SetContextState, GX2ContextState* state)
+{
+    noteTheGamesContext(state);
+    real_GX2SetContextState(state);
+}
+
+static const RplHook sHooks[] = {
+    RPL_REPLACE_LIB(GX2SetContextState, "gx2", RPL_HOOK_REQUIRED),
+};
+```
+
+`RPL_REPLACE_LIB_AS(name, module, export, flags)` is the same thing when the
+export is not spelled the way your C function is.
+
+Two limits come with it. The shape has to be `RPL_SHAPE_JUMP`, because the only
+thing known about the address is that it is a function entry. And these patches
+carry no title-ID gate, so they are removed when the title exits rather than
+gated on the way in; a title that goes down without `ON_APPLICATION_ENDS`
+running would leave one behind.
+
+Calling the export by name from inside your own hook comes straight back through
+it. Use `real_<name>`, and check it: if the function's first instruction cannot
+run from a stub there is no original to call, `real_<name>` stays NULL and the
+log says so.
 
 ### Naming a site
 
@@ -163,17 +252,35 @@ for a required hook means that RPL unloads itself while the first keeps running.
 
 ## Building
 
-devkitPPC, wut, WUPS, and the WUMS libraries `libfunctionpatcher` and
-`libmappedmemory`. `libnotifications` is used if it is installed and skipped if
-it is not. From devkitPro's MSYS2 shell:
+devkitPPC, wut, WUPS, and the WUMS libraries `libfunctionpatcher`,
+`libmappedmemory` and `libkernel`. `libnotifications` is used if it is installed
+and skipped if it is not. From devkitPro's MSYS2 shell:
 
 ```sh
-make                            # rpl_loader.wps
+git submodule update --init     # once, for the FunctionPatcher module
+make                            # rpl_loader.wps and FunctionPatcherModule.wms
+make module                     # just the module
 make DEBUG=1                    # info-level logging; DEBUG=VERBOSE for more
 make LIBWUPATCH=path/to/libwupatch
 cd examples/wwhd_cheats && make
 cd tests && make
 ```
+
+### The FunctionPatcher module
+
+Aroma's stock FunctionPatcher module dereferences the name of every loaded
+module while it looks for the title's `.rpx`, in one place, without checking for
+NULL. An RPL is listed without a name unless something puts one there, and that
+line is then `strlen(NULL)` inside the title.
+
+`tools/rplname.py` is what puts one there, so RPLs built by these Makefiles do
+not trip it and the stock module handles them. `external/FunctionPatcherModule`
+is a submodule pinned to a one-line fix for the case where something else loads
+an unnamed module. `make` builds it alongside the plugin, and it reports itself
+as `FunctionPatcherModule v0.2.5-nullname` so you can tell which one booted.
+
+The plugin will not submit a patch at all while an unnamed module is loaded, so
+even the stock module gives a refused hook and a log line rather than a crash.
 
 An RPL needs three things beyond wut, and the example Makefiles do all of them.
 
@@ -204,6 +311,10 @@ console; it replaces the running plugin and relaunches the title. `deploy-ftp`
 copies the `.wps` into `sd:/wiiu/environments/aroma/plugins/` over FTP, which
 needs the ftpiiu plugin.
 
+`external/FunctionPatcherModule/FunctionPatcherModule.wms` has to be copied over
+the stock one in `sd:/wiiu/environments/aroma/modules/` by hand. Modules are
+read at boot, so that always needs a reboot.
+
 A `.wps` replaced over FTP does not take effect until the console reboots,
 because Aroma caches plugins at boot. Relaunching the title is not enough. The
 plugin logs its own build as the first line of every title's log, so a log can
@@ -229,7 +340,7 @@ take effect on the next title launch.
 | `dry_run` | off | Loads each RPL and reports what each site would do, without patching anything. |
 | `release_failed` | on | Unloads a failed RPL rather than leaving it resident. The manifest still has to allow it. |
 | `mapped_allocator` | on | Swaps the dynload allocator around the load so an RPL's `.data` and `.bss` come from MemoryMappingModule instead of the title's heap. |
-| `physical_patch` | off | Submits patches to the FunctionPatcher by physical address rather than by executable name. Such patches are not gated by title ID. |
+| `physical_patch` | off | Submits patches to the FunctionPatcher by physical address rather than by executable name, which skips the name lookup a stock module can crash on. Such patches are not gated by title ID, so a title that exits without its hooks being removed leaves one behind. |
 | `safe_combo` | L+R+ZL+ZR | Buttons that skip injection when held at launch. The way out of an RPL that hangs a title. |
 
 Under the title's own category there is a switch per `.rpl` found, and a
@@ -255,9 +366,10 @@ are scanned per title.
 `src/main.cpp` holds the WUPS entry points and nothing else. The implementation
 is in `src/rplloader/`, with its headers mirrored in `include/rplloader/`.
 `rpl_loader.cpp` is the sequence above; the rest are the pieces it calls:
-`rpl_linker` for loading, `rpl_patcher` for libwupatch, `rpl_scan` for the
-directory, `rpl_config` for settings and the menu, `rpl_host` for the API handed
-to RPLs, `rpl_input` for the pad mirror, plus logging and notifications.
+`rpl_linker` for loading, `rpl_patcher` for libwupatch, `rpl_library` for
+resolving a system-library export, `rpl_scan` for the directory, `rpl_config`
+for settings and the menu, `rpl_host` for the API handed to RPLs, `rpl_input`
+for the pad mirror, plus logging and notifications.
 
 `include/rplloader/rplloader.h` is the only header an RPL includes. It is C, has
 no dependency on wut or libwupatch, and sits alongside the internal headers

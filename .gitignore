@@ -8,3 +8,6 @@ build_*/
 *.rpl
 *.bare.rpl
 *.crt.rpl
+
+# Proof of concept, not tracked yet
+examples/imgui-wwhd-example/

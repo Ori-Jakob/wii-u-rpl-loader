@@ -71,6 +71,8 @@ static const RplManifest sManifest = {
     RPL_FLAG_ALLOW_RELEASE,      /* the author asserts unloading is safe */
     onInit,
     onDeinit,
+    0,                            /* maxHooks: the loader default */
+    NULL, NULL,                   /* no foreground callbacks */
 };
 
 RPL_MANIFEST(sManifest)

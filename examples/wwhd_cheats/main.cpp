@@ -58,6 +58,9 @@ RplManifest gManifest = {
     .flags        = RPL_FLAG_ALLOW_RELEASE,
     .onInit       = OnInit,
     .onDeinit     = OnDeinit,
+    .maxHooks     = 0,              // the loader default is plenty for one hook
+    .onReleaseForeground  = nullptr,
+    .onAcquiredForeground = nullptr,
 };
 
 } // namespace

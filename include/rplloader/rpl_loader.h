@@ -12,6 +12,8 @@ void OnApplicationStart();
 
 // onDeinit for each initialised RPL then RemoveAll, idempotent
 void OnApplicationExit();
+void OnReleaseForeground();
+void OnAcquiredForeground();
 // Process is gone
 void OnApplicationEnd();
 

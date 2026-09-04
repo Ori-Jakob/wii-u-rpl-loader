@@ -63,7 +63,7 @@ export VPATH  := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir))
 export DEPSDIR := $(CURDIR)/$(BUILD)
 
 # Only this half's source, not every .c in the directory.
-CFILES   := $(NAME).c
+CFILES   := $(NAME).c rpl_heap.c
 CPPFILES :=
 SFILES   := crt0.s
 
