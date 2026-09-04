@@ -5,8 +5,10 @@
 #   make DEBUG=1         plus info lines
 #   make DEBUG=VERBOSE   plus every hook and chain edit
 #
-# libwupatch is taken from ../libwupatch by default; override with
-#   make LIBWUPATCH=path/to/libwupatch
+# libwupatch comes from the external/libwupatch submodule; check it out with
+#   git submodule update --init external/libwupatch
+# To build against a working copy instead, override it:
+#   make LIBWUPATCH=../libwupatch
 # (relative to this directory).
 #-------------------------------------------------------------------------------
 .SUFFIXES:
@@ -22,7 +24,7 @@ include $(DEVKITPRO)/wups/share/wups_rules
 
 WUT_ROOT   := $(DEVKITPRO)/wut
 WUMS_ROOT  := $(DEVKITPRO)/wums
-LIBWUPATCH ?= ../libwupatch
+LIBWUPATCH ?= external/libwupatch
 
 #-------------------------------------------------------------------------------
 # TARGET is the name of the output
@@ -84,6 +86,10 @@ LIBDIRS  := $(PORTLIBS) $(WUPS_ROOT) $(WUMS_ROOT) $(WUT_ROOT)
 # additional rules for different file extensions
 #-------------------------------------------------------------------------------
 ifneq ($(BUILD),$(notdir $(CURDIR)))
+ifeq ($(wildcard $(LIBWUPATCH)/include/libwupatch/wupatch.h),)
+$(error libwupatch not found at '$(LIBWUPATCH)'. Run: git submodule update --init external/libwupatch)
+endif
+
 #-------------------------------------------------------------------------------
 
 export OUTPUT := $(CURDIR)/$(TARGET)
@@ -115,10 +121,10 @@ export INCLUDE  := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 
 export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib)
 
-.PHONY: $(BUILD) clean all module
+.PHONY: $(BUILD) clean all
 
 #-------------------------------------------------------------------------------
-all: $(BUILD) module
+all: $(BUILD)
 
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
@@ -126,29 +132,9 @@ $(BUILD):
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
 #-------------------------------------------------------------------------------
-# FunctionPatcherModule with the null-name fix, from the submodule. The plugin
-# refuses to patch by executable name while an unnamed module is loaded, so the
-# stock module is not enough. Goes in sd:/wiiu/environments/<env>/modules/ and
-# needs a reboot, like any module.
-#-------------------------------------------------------------------------------
-FPMODULE     := external/FunctionPatcherModule
-FPMODULE_WMS := $(FPMODULE)/FunctionPatcherModule.wms
-
-module:
-	@if [ ! -f $(FPMODULE)/Makefile ]; then \
-		echo "$(FPMODULE) is empty. Run: git submodule update --init"; exit 1; fi
-	@if [ ! -f $(WUMS_ROOT)/lib/libkernel.a ]; then \
-		echo "libkernel is missing from $(WUMS_ROOT)."; \
-		echo "Get it from https://github.com/wiiu-env/libkernel and run 'make install' there."; \
-		exit 1; fi
-	@$(MAKE) --no-print-directory -C $(FPMODULE)
-
-#-------------------------------------------------------------------------------
 clean:
 	@echo clean ...
 	@rm -fr $(BUILD) $(TARGET).wps $(TARGET).elf $(TARGET).lst $(TARGET).map
-	@if [ -f $(FPMODULE)/Makefile ]; then \
-		$(MAKE) --no-print-directory -C $(FPMODULE) clean; fi
 
 #-------------------------------------------------------------------------------
 # deploy: build, then send the plugin to a console running Aroma's wiiload

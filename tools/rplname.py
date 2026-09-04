@@ -1,32 +1,5 @@
 #!/usr/bin/env python3
-"""rplname.py -- give a wut-built RPL the file-info name the loader lists it by.
-
-    python rplname.py wwhd_cheats.rpl wwhd_cheats.rpl
-
-Why this exists. When the Cafe loader registers a module, the name it reports
-through OSDynLoad_GetRPLInfo is NOT the name it was acquired by: it is the
-string the RPL's own file-info section points to with its `filename` field --
-which is why a retail title's modules show up as build-machine paths such as
-`bin\\ghs\\cafe\\cos\\pads\\vpad\\NDEBUG\\vpad.rpl`. wut's elf2rpl writes
-`filename = 0` and no string at all, so every wut-built RPL is listed with a
-NULL name. Anything that walks that list and builds a string from the name
-without checking -- Aroma's FunctionPatcher module does exactly that for an
-executable-by-address patch -- then crashes the title in strlen.
-
-What it does. Appends `name` (NUL-terminated, padded to 4) to the file-info
-section, sets `filename` to its offset from the start of that section,
-recomputes the section's CRC32 in the CRC table (the loader checks it before
-it will load the module), and rewrites the file with every section's data
-re-laid-out after the section header table so the grown section fits. Nothing
-else changes: compressed sections are copied as they are, and the only header
-fields touched are offsets and sizes.
-
-Layout facts this relies on, read from elf2rpl and decaf's loader: the
-file-info and CRC sections are never deflated; the CRC table holds one
-big-endian u32 per section in section order, computed over the section's
-uncompressed data, with the CRC section's own entry zero; `filename` is an
-offset relative to the file-info section's start; the file-info struct is
-0x60 bytes with `filename` at +0x30.
+"""rplname.py -- fix up a wut-built RPL so the Cafe loader will accept it.
 """
 
 import struct
@@ -46,6 +19,28 @@ def align(n, a):
     return (n + a - 1) & ~(a - 1)
 
 
+def undeflate_useless(data, headers):
+    """Store raw any section that deflating did not actually shrink."""
+    changed = []
+    for i, h in enumerate(headers):
+        if not (h[2] & SHF_DEFLATED) or h[4] == 0 or h[5] <= 4:
+            continue
+        try:
+            raw = zlib.decompress(bytes(data[h[4] + 4:h[4] + h[5]]))
+        except zlib.error:
+            continue
+        if len(raw) > h[5]:
+            continue
+        off, old = h[4], h[5]
+        data[off:off + len(raw)] = raw
+        # Blank whatever the shorter section no longer covers.
+        data[off + len(raw):off + old] = b"\0" * (old - len(raw))
+        h[2] &= ~SHF_DEFLATED
+        h[5] = len(raw)
+        changed.append((i, old, len(raw)))
+    return changed
+
+
 def main():
     if len(sys.argv) != 3:
         sys.stderr.write("usage: rplname.py <file.rpl> <name>\n")
@@ -57,7 +52,6 @@ def main():
     if data[:4] != b"\x7fELF" or data[5] != 2:
         sys.stderr.write("%s: not a big-endian ELF\n" % path)
         return 1
-    ehsize = struct.unpack(">H", data[0x28:0x2A])[0]
     shoff = struct.unpack(">I", data[0x20:0x24])[0]
     shentsize, shnum = struct.unpack(">HH", data[0x2E:0x32])
     if shentsize != 0x28 or shnum == 0 or shoff == 0:
@@ -86,42 +80,39 @@ def main():
         sys.stderr.write("%s: CRC table has %d entries, expected %d\n" % (path, headers[cr][5] // 4, shnum))
         return 1
 
-    # Pull every section's data out, in file order, exactly as stored.
-    blobs = {}
-    for i, h in enumerate(headers):
-        if h[1] == SHT_NOBITS or h[4] == 0 or h[5] == 0:
-            continue
-        blobs[i] = bytes(data[h[4]:h[4] + h[5]])
+    undeflated = undeflate_useless(data, headers)
 
-    # The file-info section: keep the struct, drop any previous name, add ours.
-    info = bytearray(blobs[fi][:FILEINFO_SIZE])
+    # The file-info section is not the last thing in the file, so growing it in
+    # place would push every section after it along -- which meant re-laying the
+    # whole file, and a console loader that streams it refused the result. Move
+    # the grown section to the end instead: every other byte stays exactly where
+    # elf2rpl put it.
+    fi_h = headers[fi]
+    info = bytearray(data[fi_h[4]:fi_h[4] + FILEINFO_SIZE])
     encoded = name.encode("ascii") + b"\0"
     encoded += b"\0" * (align(len(encoded), 4) - len(encoded))
     struct.pack_into(">I", info, FILENAME_FIELD, FILEINFO_SIZE)
-    blobs[fi] = bytes(info) + encoded
+    blob = bytes(info) + encoded
+
+    out = bytearray(data)
+    pos = align(len(out), max(fi_h[8], 4) or 4)
+    out += b"\0" * (pos - len(out))
+    fi_h[4] = pos
+    fi_h[5] = len(blob)
+    out += blob
 
     # Its CRC, over the uncompressed bytes, into the table's slot for it.
-    crcs = bytearray(blobs[cr])
-    struct.pack_into(">I", crcs, fi * 4, zlib.crc32(blobs[fi]) & 0xFFFFFFFF)
-    blobs[cr] = bytes(crcs)
+    cr_h = headers[cr]
+    struct.pack_into(">I", out, cr_h[4] + fi * 4, zlib.crc32(blob) & 0xFFFFFFFF)
 
-    # Re-lay the file: ELF header, section header table where it was, then
-    # every section's data in its original file order, each 0x40-aligned.
-    out = bytearray(data[:shoff + shnum * shentsize])
-    order = sorted(blobs.keys(), key=lambda i: headers[i][4])
-    for i in order:
-        pos = align(len(out), DATA_ALIGN)
-        out += b"\0" * (pos - len(out))
-        headers[i][4] = pos
-        headers[i][5] = len(blobs[i])
-        out += blobs[i]
-    for i, h in enumerate(headers):
-        o = shoff + i * shentsize
-        struct.pack_into(">IIIIIIIIII", out, o, *h)
+    for i in [fi] + [c[0] for c in undeflated]:
+        struct.pack_into(">IIIIIIIIII", out, shoff + i * shentsize, *headers[i])
 
     with open(path, "wb") as f:
         f.write(out)
-    sys.stdout.write("%s: file-info name '%s' (%d bytes -> %d)\n" % (path, name, len(data), len(out)))
+    note = "".join(", section %d %d->%d raw" % c for c in undeflated)
+    sys.stdout.write("%s: file-info name '%s' (%d bytes -> %d)%s\n"
+                     % (path, name, len(data), len(out), note))
     return 0
 
 

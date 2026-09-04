@@ -257,16 +257,15 @@ devkitPPC, wut, WUPS, and the WUMS libraries `libfunctionpatcher`,
 and skipped if it is not. From devkitPro's MSYS2 shell:
 
 ```sh
-git submodule update --init     # once, for the FunctionPatcher module
-make                            # rpl_loader.wps and FunctionPatcherModule.wms
-make module                     # just the module
+git submodule update --init     # once, for libwupatch
+make                            # rpl_loader.wps
 make DEBUG=1                    # info-level logging; DEBUG=VERBOSE for more
 make LIBWUPATCH=path/to/libwupatch
 cd examples/wwhd_cheats && make
 cd tests && make
 ```
 
-### The FunctionPatcher module
+### Module names and the stock FunctionPatcher
 
 Aroma's stock FunctionPatcher module dereferences the name of every loaded
 module while it looks for the title's `.rpx`, in one place, without checking for
@@ -274,13 +273,9 @@ NULL. An RPL is listed without a name unless something puts one there, and that
 line is then `strlen(NULL)` inside the title.
 
 `tools/rplname.py` is what puts one there, so RPLs built by these Makefiles do
-not trip it and the stock module handles them. `external/FunctionPatcherModule`
-is a submodule pinned to a one-line fix for the case where something else loads
-an unnamed module. `make` builds it alongside the plugin, and it reports itself
-as `FunctionPatcherModule v0.2.5-nullname` so you can tell which one booted.
-
-The plugin will not submit a patch at all while an unnamed module is loaded, so
-even the stock module gives a refused hook and a log line rather than a crash.
+not trip it and the stock module handles them. On top of that the plugin will
+not submit a patch at all while an unnamed module is loaded, so even something
+else loading one gives a refused hook and a log line rather than a crash.
 
 An RPL needs three things beyond wut, and the example Makefiles do all of them.
 
@@ -310,10 +305,6 @@ cd examples/wwhd_cheats && make deploy WIIU_IP=192.168.1.50
 console; it replaces the running plugin and relaunches the title. `deploy-ftp`
 copies the `.wps` into `sd:/wiiu/environments/aroma/plugins/` over FTP, which
 needs the ftpiiu plugin.
-
-`external/FunctionPatcherModule/FunctionPatcherModule.wms` has to be copied over
-the stock one in `sd:/wiiu/environments/aroma/modules/` by hand. Modules are
-read at boot, so that always needs a reboot.
 
 A `.wps` replaced over FTP does not take effect until the console reboots,
 because Aroma caches plugins at boot. Relaunching the title is not enough. The
