@@ -1,4 +1,5 @@
 #include "rplloader/rpl_input.h"
+#include "rplloader/rpl_loader.h"
 
 #include <string.h>
 
@@ -200,6 +201,9 @@ DECL_FUNCTION(int32_t, VPADRead, VPADChan chan, VPADStatus* buffers, uint32_t co
         return result;
 
     Rpl::Input::publish(buffers[0]);
+    // Between the two on purpose: a plugin decides, from the sample that just
+    // arrived, whether the title should see it at all.
+    Rpl::Loader::OnPadSampled();
     Rpl::Input::editVpad(buffers, (uint32_t)result < count ? (uint32_t)result : count);
     return result;
 }

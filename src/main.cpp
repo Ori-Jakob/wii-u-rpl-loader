@@ -6,7 +6,7 @@
 #include "rplloader/rpl_notify.h"
 
 WUPS_PLUGIN_NAME("RPL Loader");
-WUPS_PLUGIN_DESCRIPTION("Loads the .rpl files in sd:/wiiu/rpl-loader/<title id>/ into the running title and installs the hooks they declare");
+WUPS_PLUGIN_DESCRIPTION("Loads the .rpl files in sd:/wiiu/rpl-loader/<title id>/ and /universal/ into the running title and installs the hooks they declare");
 WUPS_PLUGIN_VERSION("v0.1.0");
 WUPS_PLUGIN_AUTHOR("n0ted");
 WUPS_PLUGIN_LICENSE("TBD");

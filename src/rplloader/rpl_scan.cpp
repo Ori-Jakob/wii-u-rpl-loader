@@ -19,6 +19,20 @@ void TitleDir(uint64_t titleId, char* out, int cap)
              (unsigned long long)titleId);
 }
 
+void UniversalDir(char* out, int cap)
+{
+    snprintf(out, (size_t)cap, "fs:/vol/external01/wiiu/rpl-loader/%s/",
+             kUniversalLeaf);
+}
+
+void DirLeaf(const Entry& e, uint64_t titleId, char* out, int cap)
+{
+    if (e.universal)
+        snprintf(out, (size_t)cap, "%s", kUniversalLeaf);
+    else
+        snprintf(out, (size_t)cap, "%016llX", (unsigned long long)titleId);
+}
+
 int ScanDir(const char* dir, Entry* out, int cap)
 {
     DIR* d = opendir(dir);

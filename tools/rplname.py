@@ -13,6 +13,8 @@ SHF_DEFLATED = 0x08000000
 FILEINFO_SIZE = 0x60
 FILENAME_FIELD = 0x30
 DATA_ALIGN = 0x40
+TITLES_SECTION = ".rpltitles"
+TITLES_MAGIC = 0x5250544C
 
 
 def align(n, a):
@@ -39,6 +41,43 @@ def undeflate_useless(data, headers):
         h[5] = len(raw)
         changed.append((i, old, len(raw)))
     return changed
+
+
+def section_names(data, headers, shstrndx):
+    """sh_name -> text, decompressing the string table if it is deflated."""
+    h = headers[shstrndx]
+    blob = bytes(data[h[4]:h[4] + h[5]])
+    if h[2] & SHF_DEFLATED:
+        blob = zlib.decompress(blob[4:])
+    out = []
+    for h in headers:
+        end = blob.find(b"\0", h[0])
+        out.append(blob[h[0]:end if end >= 0 else None].decode("ascii", "replace"))
+    return out
+
+
+def read_titles(data, headers, names):
+    """The ids from .rpltitles, or None. Deflated is fine: this runs on a PC."""
+    for i, nm in enumerate(names):
+        if nm != TITLES_SECTION:
+            continue
+        h = headers[i]
+        blob = bytes(data[h[4]:h[4] + h[5]])
+        if h[2] & SHF_DEFLATED:
+            try:
+                blob = zlib.decompress(blob[4:])
+            except zlib.error:
+                return None
+        if len(blob) < 16:
+            return None
+        magic, ver, count, _ = struct.unpack(">IIII", blob[:16])
+        if magic != TITLES_MAGIC or ver != 1:
+            return None
+        have = (len(blob) - 16) // 8
+        count = min(count, have)
+        return [struct.unpack(">Q", blob[16 + k * 8:24 + k * 8])[0]
+                for k in range(count)]
+    return None
 
 
 def main():
@@ -80,6 +119,9 @@ def main():
         sys.stderr.write("%s: CRC table has %d entries, expected %d\n" % (path, headers[cr][5] // 4, shnum))
         return 1
 
+    shstrndx = struct.unpack(">H", data[0x32:0x34])[0]
+    names = section_names(data, headers, shstrndx) if shstrndx < shnum else []
+
     undeflated = undeflate_useless(data, headers)
 
     # The file-info section is not the last thing in the file, so growing it in
@@ -89,10 +131,17 @@ def main():
     # elf2rpl put it.
     fi_h = headers[fi]
     info = bytearray(data[fi_h[4]:fi_h[4] + FILEINFO_SIZE])
+
+    titles = read_titles(data, headers, names)
+    tblob = b""
+    if titles:
+        tblob = struct.pack(">IIII", TITLES_MAGIC, 1, len(titles), 0)
+        tblob += b"".join(struct.pack(">Q", t) for t in titles)
+
     encoded = name.encode("ascii") + b"\0"
     encoded += b"\0" * (align(len(encoded), 4) - len(encoded))
-    struct.pack_into(">I", info, FILENAME_FIELD, FILEINFO_SIZE)
-    blob = bytes(info) + encoded
+    struct.pack_into(">I", info, FILENAME_FIELD, FILEINFO_SIZE + len(tblob))
+    blob = bytes(info) + tblob + encoded
 
     out = bytearray(data)
     pos = align(len(out), max(fi_h[8], 4) or 4)
@@ -111,6 +160,8 @@ def main():
     with open(path, "wb") as f:
         f.write(out)
     note = "".join(", section %d %d->%d raw" % c for c in undeflated)
+    if titles:
+        note += ", %d title id(s) copied into file-info" % len(titles)
     sys.stdout.write("%s: file-info name '%s' (%d bytes -> %d)%s\n"
                      % (path, name, len(data), len(out), note))
     return 0

@@ -9,10 +9,12 @@
 #include "rplloader/rpl_notify.h"
 #include "rplloader/rpl_patcher.h"
 #include "rplloader/rpl_scan.h"
+#include "rplloader/rpl_titles.h"
 
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include <coreinit/title.h>
 #include <vpad/input.h>
@@ -26,6 +28,7 @@ static Module   s_modules[kMaxModules];
 static int      s_count = 0;
 static uint64_t s_titleId = 0;
 static char     s_dir[96];
+static char     s_uniDir[96];
 static bool     s_safeMode = false;
 static bool     s_started = false;
 static bool     s_exited = false;
@@ -121,7 +124,24 @@ static void loadOne(Module& m)
         return;
     }
 
-    Linker::AcquireName(s_titleId, m.entry.file, m.acquireName, sizeof(m.acquireName));
+    // If the file says which titles it serves, believe it before loading
+    // anything: a plugin for another title is never brought into this process.
+    Titles::List titles;
+    char rplPath[160];
+    snprintf(rplPath, sizeof(rplPath), "%s%s",
+             m.entry.universal ? s_uniDir : s_dir, m.entry.file);
+    if (Titles::Check(rplPath, s_titleId, &titles) == Titles::NO_MATCH) {
+        char supported[96];
+        Titles::Describe(titles, supported, sizeof(supported));
+        setStatus(m, MOD_TITLE_GATE, "serves %s", supported);
+        Log::Printf(Log::INFO, "%s: found but not for this title; it serves %s",
+                    m.entry.file, supported);
+        return;
+    }
+
+    char dirLeaf[24];
+    Scan::DirLeaf(m.entry, s_titleId, dirLeaf, sizeof(dirLeaf));
+    Linker::AcquireName(dirLeaf, m.entry.file, m.acquireName, sizeof(m.acquireName));
     // If the second line never appears the loader hung
     Log::Printf(Log::INFO, "%s: acquiring %s (%s allocator)", m.entry.file, m.acquireName,
                 cfg.mappedAllocator ? "mapped-memory" : "default");
@@ -164,7 +184,8 @@ static void loadOne(Module& m)
     if (m.manifest->titleIds && m.manifest->titleIdCount) {
         bool listed = false;
         for (uint32_t i = 0; i < m.manifest->titleIdCount; ++i)
-            if (m.manifest->titleIds[i] == s_titleId)
+            if (m.manifest->titleIds[i] == s_titleId ||
+                m.manifest->titleIds[i] == RPL_TITLE_ANY)
                 listed = true;
         if (!listed) {
             fail(m, MOD_TITLE_GATE, "manifest does not list this title");
@@ -241,8 +262,11 @@ void OnApplicationStart()
     Config::Load();
     s_titleId = OSGetTitleID();
     Scan::TitleDir(s_titleId, s_dir, sizeof(s_dir));
+    Scan::UniversalDir(s_uniDir, sizeof(s_uniDir));
     // Aroma can keep the plugin it loaded at boot after the .wps is replaced
     Log::Printf(Log::INFO, "build %s", BuildStamp());
+    if (Log::FilePath()[0])
+        Log::Printf(Log::INFO, "logging to %s", Log::FilePath());
 
     const Config::Settings& cfg = Config::Get();
     if (!cfg.enabled) {
@@ -250,19 +274,46 @@ void OnApplicationStart()
         return;
     }
 
-    Scan::Entry entries[kMaxModules];
-    const int n = Scan::ScanDir(s_dir, entries, kMaxModules);
-    Log::Printf(n ? Log::INFO : Log::VERBOSE, "title %016llX: %d rpl(s) in %s",
-                (unsigned long long)s_titleId, n, s_dir);
-    if (n == 0)
+    Scan::Entry titled[kMaxModules];
+    Scan::Entry shared[kMaxModules];
+    const int nt = Scan::ScanDir(s_dir, titled, kMaxModules);
+    const int nu = Scan::ScanDir(s_uniDir, shared, kMaxModules);
+    Log::Printf((nt + nu) ? Log::INFO : Log::VERBOSE,
+                "title %016llX: %d rpl(s) in %s, %d in %s",
+                (unsigned long long)s_titleId, nt, s_dir, nu, s_uniDir);
+    if (nt + nu == 0)
         return;
 
-    for (int i = 0; i < n; ++i) {
+    // Shared first, so a title folder's copy of the same name loads later and
+    // wins the name; priority still decides who owns a contested site.
+    for (int i = 0; i < nu && s_count < kMaxModules; ++i) {
+        bool shadowed = false;
+        for (int j = 0; j < nt; ++j)
+            if (strcasecmp(shared[i].stem, titled[j].stem) == 0) {
+                shadowed = true;
+                break;
+            }
+        if (shadowed) {
+            Log::Printf(Log::INFO, "%s: shared copy ignored, the title folder has one",
+                        shared[i].file);
+            continue;
+        }
         Module& m = s_modules[s_count++];
         m.used = true;
-        m.entry = entries[i];
+        m.entry = shared[i];
+        m.entry.universal = true;
         copyText(m.name, sizeof(m.name), m.entry.stem);
     }
+    for (int i = 0; i < nt && s_count < kMaxModules; ++i) {
+        Module& m = s_modules[s_count++];
+        m.used = true;
+        m.entry = titled[i];
+        m.entry.universal = false;
+        copyText(m.name, sizeof(m.name), m.entry.stem);
+    }
+    if (nt + nu > kMaxModules)
+        Log::Printf(Log::WARN, "more than %d rpl(s) found; the rest are ignored",
+                    kMaxModules);
 
     s_safeMode = comboHeld(cfg.safeCombo);
     if (s_safeMode) {
@@ -352,6 +403,15 @@ void OnAcquiredForeground()
         Module& m = s_modules[i];
         if (m.initialised && m.manifest && m.manifest->onAcquiredForeground)
             m.manifest->onAcquiredForeground();
+    }
+}
+
+void OnPadSampled()
+{
+    for (int i = 0; i < s_count; ++i) {
+        Module& m = s_modules[i];
+        if (m.initialised && m.manifest && m.manifest->onPadSampled)
+            m.manifest->onPadSampled();
     }
 }
 

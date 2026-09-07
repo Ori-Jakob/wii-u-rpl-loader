@@ -19,6 +19,7 @@ struct Settings {
     bool dryRun;           // load and check, apply nothing
     bool releaseFailed;    // OSDynLoad_Release a failed RPL that allows it
     bool mappedAllocator;  // give the loader MemoryMappingModule memory for RPL data
+    bool fileLog;          // mirror the log to sd:/wiiu/rpl-loader/logs/
     bool physicalPatch;    // libwupatch: FunctionPatcher by physical address, not by executable name
     int  safeCombo;        // SafeCombo
 };

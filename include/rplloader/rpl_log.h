@@ -20,5 +20,11 @@ void VPrintf(int level, const char* prefix, const char* fmt, va_list args);
 // The sink libwupatch is given
 void WuPatchSink(int level, const char* line);
 
+// Mirror every line into sd:/wiiu/rpl-loader/logs/<title id>-<stamp>.log.
+// The file is opened on the first line written after this is turned on, so the
+// title id and the timestamp are both the running session's.
+void SetFileLogging(bool enabled);
+const char* FilePath();   // "" when nothing is being written
+
 } // namespace Log
 } // namespace Rpl

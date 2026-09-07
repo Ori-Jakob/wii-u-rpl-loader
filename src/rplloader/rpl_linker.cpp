@@ -44,9 +44,9 @@ bool ResolveRpx(uint32_t* textDelta, uint32_t* dataDelta, uint32_t* textAddr, ui
     return false;
 }
 
-void AcquireName(uint64_t titleId, const char* file, char* name, int cap)
+void AcquireName(const char* dirLeaf, const char* file, char* name, int cap)
 {
-    snprintf(name, (size_t)cap, "~/wiiu/rpl-loader/%016llX/%s", (unsigned long long)titleId, file);
+    snprintf(name, (size_t)cap, "~/wiiu/rpl-loader/%s/%s", dirLeaf, file);
 }
 
 

@@ -2,6 +2,10 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+
+#include <coreinit/time.h>
+#include <coreinit/title.h>
 
 #include <whb/log.h>
 #include <whb/log_cafe.h>
@@ -14,6 +18,74 @@ static int  s_level = INFO;
 static bool s_module = false;
 static bool s_cafe = false;
 
+static const char* const kLogDir = "fs:/vol/external01/wiiu/rpl-loader/logs";
+
+static FILE* s_file = 0;
+static char  s_filePath[160] = "";
+static bool  s_fileWanted = false;
+static bool  s_fileTried = false;
+
+static void openFile()
+{
+    if (s_fileTried || !s_fileWanted)
+        return;
+    s_fileTried = true;
+
+    mkdir(kLogDir, 0777);   // already there is fine
+
+    // One file per title, truncated at every boot. A file per session reads
+    // more tidily but quietly fills the card, and the log that matters is
+    // almost always the one from the run that just happened.
+    snprintf(s_filePath, sizeof(s_filePath), "%s/%016llX.log", kLogDir,
+             (unsigned long long)OSGetTitleID());
+
+    s_file = fopen(s_filePath, "w");
+    if (!s_file) {
+        s_filePath[0] = 0;
+        return;
+    }
+
+    // The name no longer carries the date, so the first line does.
+    OSCalendarTime ct;
+    OSTicksToCalendarTime(OSGetTime(), &ct);
+    char head[96];
+    snprintf(head, sizeof(head),
+             "---- session %04d-%02d-%02d %02d:%02d:%02d ----",
+             ct.tm_year, ct.tm_mon + 1, ct.tm_mday, ct.tm_hour, ct.tm_min,
+             ct.tm_sec);
+    fputs(head, s_file);
+    fputc(10, s_file);
+    fflush(s_file);
+}
+
+static void emit(const char* line)
+{
+    WHBLogPrint(line);
+    if (!s_file)
+        openFile();
+    if (s_file) {
+        fputs(line, s_file);
+        fputc('\n', s_file);
+        fflush(s_file);
+    }
+}
+
+void SetFileLogging(bool enabled)
+{
+    if (enabled == s_fileWanted)
+        return;
+    s_fileWanted = enabled;
+    if (!enabled && s_file) {
+        fclose(s_file);
+        s_file = 0;
+        s_filePath[0] = '\0';
+    }
+    if (enabled)
+        s_fileTried = false;   // a fresh file for the next line
+}
+
+const char* FilePath() { return s_filePath; }
+
 void Init()
 {
     // The LoggingModule handle does not survive a title switch
@@ -25,6 +97,12 @@ void Init()
 
 void Deinit()
 {
+    if (s_file) {
+        fclose(s_file);
+        s_file = 0;
+    }
+    s_fileTried = false;
+    s_filePath[0] = '\0';
     if (s_module) {
         WHBLogModuleDeinit();
         s_module = false;
@@ -61,7 +139,7 @@ void VPrintf(int level, const char* prefix, const char* fmt, va_list args)
     if (used < 0 || used >= (int)sizeof(line))
         return;
     vsnprintf(line + used, sizeof(line) - (size_t)used, fmt, args);
-    WHBLogPrint(line);
+    emit(line);
 }
 
 void Printf(int level, const char* fmt, ...)
@@ -78,7 +156,7 @@ void WuPatchSink(int wupatchLevel, const char* line)
     const int level = wupatchLevel >= 2 ? ERROR : wupatchLevel == 1 ? WARN : INFO;
     if (level > s_level && level != ERROR)
         return;
-    WHBLogPrint(line);
+    emit(line);
 }
 
 } // namespace Log

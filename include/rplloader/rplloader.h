@@ -7,7 +7,10 @@ extern "C" {
 #endif
 
 #define RPL_MAGIC        0x52504C4Cu   /* 'RPLL' */
-#define RPL_ABI_VERSION  4u
+#define RPL_ABI_VERSION  5u
+#define RPL_TITLES_MAGIC   0x5250544Cu   /* 'RPTL' */
+#define RPL_TITLES_SECTION ".rpltitles"
+#define RPL_TITLE_ANY      0xFFFFFFFFFFFFFFFFull
 
 typedef enum RplShape {
     // At a function entry this is a plain replacement, *original is the rest of it
@@ -162,6 +165,15 @@ typedef struct RplManifest {
     // the second. Both may be NULL.
     void (*onReleaseForeground)(void);
     void (*onAcquiredForeground)(void);
+
+    // Called from inside VPADRead, after this RPL's sample has been published
+    // and BEFORE the title's buffers are edited. setInputMode() from here takes
+    // effect on THIS read instead of the next one, which is the only way to
+    // stop the frame a combo completes from also reaching the title.
+    //
+    // It runs on the title's own input path, so keep it short and do not call
+    // back into VPAD. May be NULL.
+    void (*onPadSampled)(void);
 } RplManifest;
 
 typedef const RplManifest* (*RplManifestFn)(void);

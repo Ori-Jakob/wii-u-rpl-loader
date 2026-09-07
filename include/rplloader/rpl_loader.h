@@ -14,6 +14,7 @@ void OnApplicationStart();
 void OnApplicationExit();
 void OnReleaseForeground();
 void OnAcquiredForeground();
+void OnPadSampled();
 // Process is gone
 void OnApplicationEnd();
 

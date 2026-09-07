@@ -13,7 +13,7 @@ namespace Linker {
 bool ResolveRpx(uint32_t* textDelta, uint32_t* dataDelta, uint32_t* textAddr, uint32_t* textSize);
 
 // Builds "~/wiiu/rpl-loader/<tid>/<file>", cap >= 64
-void AcquireName(uint64_t titleId, const char* file, char* name, int cap);
+void AcquireName(const char* dirLeaf, const char* file, char* name, int cap);
 
 // Acquire, optionally with the dynload allocator swapped to mapped memory
 bool Acquire(const char* name, bool mappedAllocator, OSDynLoad_Module* out, char* err, int errCap);

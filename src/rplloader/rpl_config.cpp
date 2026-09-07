@@ -27,6 +27,7 @@ static const char* kDryRun          = "dry_run";
 static const char* kReleaseFailed   = "release_failed";
 static const char* kMappedAllocator = "mapped_allocator";
 static const char* kPhysicalPatch   = "physical_patch";
+static const char* kFileLog         = "file_log";
 static const char* kSafeCombo       = "safe_combo";
 
 
@@ -53,6 +54,7 @@ static int getInt(wups_storage_item parent, const char* key, int def)
 static void apply()
 {
     Log::SetLevel(s_settings.logLevel);
+    Log::SetFileLogging(s_settings.fileLog);
     Notify::SetEnabled(s_settings.notify);
 }
 
@@ -68,6 +70,9 @@ void Load()
     s_settings.mappedAllocator = getBool(nullptr, kMappedAllocator, true);
     // By name walks the module list and dies on a NULL name, by address is never gated
     s_settings.physicalPatch   = getBool(nullptr, kPhysicalPatch, false);
+    // On by default: the lines worth reading are usually from a session that
+    // has already ended badly, and OSReport needs something listening.
+    s_settings.fileLog         = getBool(nullptr, kFileLog, true);
     s_settings.safeCombo       = getInt(nullptr, kSafeCombo, COMBO_L_R_ZL_ZR);
     apply();
 }
@@ -150,6 +155,7 @@ static void boolChanged(ConfigItemBoolean* item, bool value)
     else if (strcmp(id, kReleaseFailed) == 0)   s_settings.releaseFailed = value;
     else if (strcmp(id, kMappedAllocator) == 0) s_settings.mappedAllocator = value;
     else if (strcmp(id, kPhysicalPatch) == 0)   s_settings.physicalPatch = value;
+    else if (strcmp(id, kFileLog) == 0)         s_settings.fileLog = value;
     else return;
     WUPSStorageAPI_StoreBool(nullptr, id, value);
     apply();
@@ -241,6 +247,8 @@ static WUPSConfigAPICallbackStatus menuOpened(WUPSConfigCategoryHandle root)
                                         s_settings.mappedAllocator, boolChanged);
     WUPSConfigItemBoolean_AddToCategory(root, kPhysicalPatch, "Patch by physical address (experimental)", false,
                                         s_settings.physicalPatch, boolChanged);
+    WUPSConfigItemBoolean_AddToCategory(root, kFileLog, "Write a log file to sd:/wiiu/rpl-loader/logs", true,
+                                        s_settings.fileLog, boolChanged);
 
     static ConfigItemMultipleValuesPair combos[] = {
         { COMBO_NONE, "none" }, { COMBO_L_R_ZL_ZR, "L+R+ZL+ZR" }, { COMBO_MINUS, "Minus" }, { COMBO_PLUS_MINUS, "Plus+Minus" },
