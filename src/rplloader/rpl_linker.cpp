@@ -137,8 +137,9 @@ bool FindManifest(OSDynLoad_Module module, const RplManifest** out, char* err, i
         snprintf(err, (size_t)errCap, "bad magic %08X", (unsigned)m->magic);
         return false;
     }
-    if (m->abiVersion != RPL_ABI_VERSION) {
-        snprintf(err, (size_t)errCap, "ABI %u, plugin speaks %u", (unsigned)m->abiVersion,
+    if (m->abiVersion < RPL_ABI_MIN_VERSION || m->abiVersion > RPL_ABI_VERSION) {
+        snprintf(err, (size_t)errCap, "unsupported ABI %u (loader accepts %u-%u)",
+                 (unsigned)m->abiVersion, (unsigned)RPL_ABI_MIN_VERSION,
                  (unsigned)RPL_ABI_VERSION);
         return false;
     }

@@ -132,6 +132,25 @@ bool SetModuleBool(uint64_t titleId, const char* stem, const char* key, bool val
     return true;
 }
 
+int32_t GetModuleInt(uint64_t titleId, const char* stem, const char* key, int32_t def)
+{
+    wups_storage_item item = nullptr;
+    if (!moduleItem(titleId, stem, &item, true))
+        return def;
+    return (int32_t)getInt(item, key, (int)def);
+}
+
+bool SetModuleInt(uint64_t titleId, const char* stem, const char* key, int32_t value)
+{
+    wups_storage_item item = nullptr;
+    if (!moduleItem(titleId, stem, &item, true))
+        return false;
+    if (WUPSStorageAPI_StoreInt(item, key, value) != WUPS_STORAGE_ERROR_SUCCESS)
+        return false;
+    WUPSStorageAPI_SaveStorage(false);
+    return true;
+}
+
 
 static char s_moduleIds[kMaxModules][Scan::kNameChars + 8];
 

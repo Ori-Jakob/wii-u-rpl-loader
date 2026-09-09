@@ -7,7 +7,9 @@ extern "C" {
 #endif
 
 #define RPL_MAGIC        0x52504C4Cu   /* 'RPLL' */
-#define RPL_ABI_VERSION  5u
+#define RPL_ABI_VERSION      6u
+// ABI 5 has the same manifest/data layouts; ABI 6 only appends host callbacks.
+#define RPL_ABI_MIN_VERSION  5u
 #define RPL_TITLES_MAGIC   0x5250544Cu   /* 'RPTL' */
 #define RPL_TITLES_SECTION ".rpltitles"
 #define RPL_TITLE_ANY      0xFFFFFFFFFFFFFFFFull
@@ -136,6 +138,17 @@ struct RplHost {
     // Two floats -1..1 driving the left stick in the title's place, or NULL to
     // hand it back. Applies on every controller, and survives BLOCK.
     void     (*setStick)(const RplHost* h, const float* leftXY);
+
+    // Buttons held in the title's place, using VPAD_BUTTON_* bit values. The
+    // loader maps buttons shared by the GamePad, Pro Controller and Classic
+    // Controller. Pass 0 to release them. Applies on every controller and
+    // survives BLOCK; hold/trigger/release are synthesised for the title.
+    void     (*setButtons)(const RplHost* h, uint32_t vpadButtonMask);
+
+    // Persistent per-title, per-RPL integer settings. getInt writes the
+    // default when the key is absent; setInt returns 0 on success.
+    int32_t  (*getInt)(const RplHost* h, const char* key, int32_t def);
+    int      (*setInt)(const RplHost* h, const char* key, int32_t value);
 };
 
 enum {

@@ -9,9 +9,10 @@ namespace Input {
 bool Get(RplPad* out);
 bool GetKpad(uint32_t chan, RplKpad* out);
 
-// What the title is allowed to read, and an override for its left stick
+// What the title is allowed to read, plus virtual controls injected into it
 void SetMode(int mode);
 void SetStick(const float* leftXY);
+void SetButtons(uint32_t vpadButtonMask);
 
 // New process, nothing read yet
 void Reset();

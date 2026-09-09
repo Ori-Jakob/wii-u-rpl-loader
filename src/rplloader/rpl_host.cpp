@@ -148,6 +148,27 @@ static void hostSetStick(const RplHost*, const float* leftXY)
     Input::SetStick(leftXY);
 }
 
+static void hostSetButtons(const RplHost*, uint32_t vpadButtonMask)
+{
+    Input::SetButtons(vpadButtonMask);
+}
+
+static int32_t hostGetInt(const RplHost* h, const char* key, int32_t def)
+{
+    Module* m = moduleOf(h);
+    if (!m || !key)
+        return def;
+    return Config::GetModuleInt(s_titleId, m->entry.stem, key, def);
+}
+
+static int hostSetInt(const RplHost* h, const char* key, int32_t value)
+{
+    Module* m = moduleOf(h);
+    if (!m || !key)
+        return -1;
+    return Config::SetModuleInt(s_titleId, m->entry.stem, key, value) ? 0 : -1;
+}
+
 void Bind(Module& m, uint64_t titleId, uint32_t textDelta, uint32_t dataDelta, const char* dir)
 {
     s_titleId = titleId;
@@ -155,7 +176,9 @@ void Bind(Module& m, uint64_t titleId, uint32_t textDelta, uint32_t dataDelta, c
     s_dataDelta = dataDelta;
 
     RplHost& h = m.host;
-    h.version    = RPL_ABI_VERSION;
+    // ABI 5 has the same manifest and is a strict prefix of this host table.
+    // Report the negotiated version so legacy RPLs that check it still work.
+    h.version    = m.manifest ? m.manifest->abiVersion : RPL_ABI_VERSION;
     h.name       = m.name;
     h.dir        = dir;
     h.impl       = &m;
@@ -176,6 +199,9 @@ void Bind(Module& m, uint64_t titleId, uint32_t textDelta, uint32_t dataDelta, c
     h.kpad       = hostKpad;
     h.setInputMode = hostSetInputMode;
     h.setStick   = hostSetStick;
+    h.setButtons = hostSetButtons;
+    h.getInt     = hostGetInt;
+    h.setInt     = hostSetInt;
 }
 
 } // namespace Host

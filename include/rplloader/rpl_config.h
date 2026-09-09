@@ -35,6 +35,8 @@ void SetModuleEnabled(uint64_t titleId, const char* stem, bool enabled);
 // An RPL's own slice, via the host API
 bool GetModuleBool(uint64_t titleId, const char* stem, const char* key, bool def);
 bool SetModuleBool(uint64_t titleId, const char* stem, const char* key, bool value);
+int32_t GetModuleInt(uint64_t titleId, const char* stem, const char* key, int32_t def);
+bool SetModuleInt(uint64_t titleId, const char* stem, const char* key, int32_t value);
 
 // Once, from INITIALIZE_PLUGIN
 void InitMenu();
