@@ -12,17 +12,20 @@ TARGET   := wwhd_mss
 BUILD    := build
 CRT      := ../../crt
 LIBWWHD  ?= ../../../wwhd-tools/extern/libwwhd
-SOURCES  := . $(CRT)
-INCLUDES := ../../include $(LIBWWHD)/include
+IMGUI    ?= ../../../wwhd-tools/external/imgui
+IMGUI_WIIU := $(IMGUI)/backends/wiiu
+SOURCES  := . $(IMGUI) $(IMGUI_WIIU) $(CRT)
+INCLUDES := . ../../include $(IMGUI) $(IMGUI_WIIU) $(LIBWWHD)/include
 
 CFLAGS   := -Wall -Wextra -O2 -ffunction-sections -msdata=none \
             $(MACHDEP) $(INCLUDE) -D__WIIU__ -D__WUT__
-CXXFLAGS := $(CFLAGS) -std=c++20 -fno-exceptions -fno-rtti
+CXXFLAGS := $(CFLAGS) -std=c++20 -fno-exceptions -fno-rtti \
+            -DIMGUI_USER_CONFIG='"imgui_rpl_config.h"'
 ASFLAGS  := -g $(MACHDEP)
 LDFLAGS   = -g $(MACHDEP) -specs=$(WUT_ROOT)/share/wut.specs -specs=$(TOPDIR)/$(CRT)/rplloader.specs \
             -Wl,-Map,$(notdir $*.map)
 
-LIBS     := -lwut
+LIBS     := -lwut -lm
 LIBDIRS  := $(PORTLIBS) $(WUT_ROOT)
 
 ifneq ($(BUILD),$(notdir $(CURDIR)))
@@ -34,7 +37,7 @@ export VPATH   := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir))
 export DEPSDIR := $(CURDIR)/$(BUILD)
 
 CFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
-CPPFILES := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
+CPPFILES := $(filter-out imgui_demo.cpp imgui_impl_wiiu.cpp,$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp))))
 SFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 
 ifeq ($(strip $(CPPFILES)),)
@@ -103,6 +106,10 @@ exports.s: $(TOPDIR)/exports.def
 exports.o: exports.s
 
 $(OFILES_SRC): $(HFILES_BIN)
+
+# IM_ASSERT here logs and carries on, so GCC's range analysis follows the
+# would-have-asserted index into the array and warns at -O2.
+imgui.o imgui_draw.o imgui_tables.o imgui_widgets.o: CXXFLAGS += -Wno-array-bounds
 
 -include $(DEPENDS)
 

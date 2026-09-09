@@ -2,5 +2,5 @@
 titleIds = 0005000010143500,0005000010143600
 name = "WWHD Macro MSS"
 path = "The Legend of Zelda: The Wind Waker HD/Mods/WWHD Macro MSS"
-description = Loads the standalone MSS input macro. Hold ZR+A while swimming. By n0ted
+description = Standalone MSS macro with adjustable PLUS delay, stick control, and an on-screen status watermark. Hold ZR+A while swimming; ZL+L+Minus opens settings. By n0ted
 version = 7

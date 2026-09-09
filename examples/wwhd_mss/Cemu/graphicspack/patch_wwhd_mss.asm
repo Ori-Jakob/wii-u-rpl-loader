@@ -183,16 +183,111 @@ kpad_done:
     addi  r1, r1, 0x30
     blr
 
+
+gx2_copy_hook:
+    stwu  r1, -0x30(r1)
+    mflr  r0
+    stw   r0, 0x24(r1)
+    stw   r3, 0x10(r1)
+    stw   r4, 0x14(r1)
+
+    bl    _rpl_resolve
+    cmpwi r9, 0
+    beq   gx2_copy_fallback
+
+    mtctr r9
+    li    r3, 6
+    lwz   r4, 0x10(r1)
+    lwz   r5, 0x14(r1)
+    li    r6, 0
+    bctrl
+    cmpwi r3, 0
+    bne   gx2_copy_done
+
+gx2_copy_fallback:
+    lwz   r3, 0x10(r1)
+    lwz   r4, 0x14(r1)
+    bl    import.gx2.GX2CopyColorBufferToScanBuffer
+
+gx2_copy_done:
+    lwz   r0, 0x24(r1)
+    mtlr  r0
+    addi  r1, r1, 0x30
+    blr
+
+
+gx2_context_hook:
+    stwu  r1, -0x30(r1)
+    mflr  r0
+    stw   r0, 0x24(r1)
+    stw   r3, 0x10(r1)
+
+    bl    _rpl_resolve
+    cmpwi r9, 0
+    beq   gx2_context_fallback
+
+    mtctr r9
+    li    r3, 8
+    lwz   r4, 0x10(r1)
+    li    r5, 0
+    li    r6, 0
+    bctrl
+    cmpwi r3, 0
+    bne   gx2_context_done
+
+gx2_context_fallback:
+    lwz   r3, 0x10(r1)
+    bl    import.gx2.GX2SetContextState
+
+gx2_context_done:
+    lwz   r0, 0x24(r1)
+    mtlr  r0
+    addi  r1, r1, 0x30
+    blr
+
 0x0200E6EC = b   counter_hook
+0x02035274 = bla gx2_context_hook
 
 [WWHD_MSS_USA]
 moduleMatches = 0x475bd29f
 
 0x0273E420 = bla vpad_read_hook
 0x0273D93C = bla kpad_read_hook
+0x0274C59C = bla gx2_context_hook
+0x0274C5D0 = bla gx2_context_hook
+0x0274C630 = bla gx2_context_hook
+0x0274C664 = bla gx2_context_hook
+0x02750E88 = bla gx2_context_hook
+0x02750EC0 = bla gx2_context_hook
+0x02750EE8 = bla gx2_context_hook
+0x02750F00 = bla gx2_context_hook
+0x02750F38 = bla gx2_context_hook
+0x02750F68 = bla gx2_context_hook
+0x02750F98 = bla gx2_context_hook
+0x027510A4 = bla gx2_copy_hook
+0x0276B150 = ba  gx2_context_hook
+0x0276B158 = ba  gx2_context_hook
+0x027B9938 = bla gx2_copy_hook
+0x027B9958 = bla gx2_copy_hook
 
 [WWHD_MSS_EUR]
 moduleMatches = 0xb7e748de
 
 0x0273ECDC = bla vpad_read_hook
 0x0273E1F8 = bla kpad_read_hook
+0x0274CE58 = bla gx2_context_hook
+0x0274CE8C = bla gx2_context_hook
+0x0274CEEC = bla gx2_context_hook
+0x0274CF20 = bla gx2_context_hook
+0x02751744 = bla gx2_context_hook
+0x0275177C = bla gx2_context_hook
+0x027517A4 = bla gx2_context_hook
+0x027517BC = bla gx2_context_hook
+0x027517F4 = bla gx2_context_hook
+0x02751824 = bla gx2_context_hook
+0x02751854 = bla gx2_context_hook
+0x02751960 = bla gx2_copy_hook
+0x0276BA10 = ba  gx2_context_hook
+0x0276BA18 = ba  gx2_context_hook
+0x027BA1F8 = bla gx2_copy_hook
+0x027BA218 = bla gx2_copy_hook

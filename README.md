@@ -262,8 +262,12 @@ make                            # rpl_loader.wps
 make DEBUG=1                    # info-level logging; DEBUG=VERBOSE for more
 make LIBWUPATCH=path/to/libwupatch
 cd examples/wwhd_cheats && make
+cd examples/wwhd_mss && make
 cd tests && make
 ```
+
+`examples/wwhd_mss/Cemu` contains the graphics pack and setup instructions for
+using the same `wwhd_mss.rpl` build under Cemu.
 
 ### Module names and the stock FunctionPatcher
 
